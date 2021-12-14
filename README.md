@@ -11,6 +11,15 @@ following components:
 * **LimeSuite API examples** (basicRX, basicTX, singleRX, dualRXTX, gpio_example);
 * **Octave plugin** (provides some basic functionality only);
 
+This branch is a WIP fork adding support for Fairwave's XTRX, with [LiteX-based
+gateware](https://github.com/enjoy-digital/xtrx_julia/), interfaced over PCIe
+using [LitePCIe](https://github.com/JuliaComputing/litepcie). Build
+instructions:
+
+```
+LITEPCIE_ROOT=/path/to/litepcie cmake -DENABLE_XTRX=yes ...
+```
+
 ## Build Status
 - GitHub: ![Cross platform build status](https://github.com/myriadrf/LimeSuite/actions/workflows/cmake.yml/badge.svg)
 
