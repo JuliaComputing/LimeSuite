@@ -103,7 +103,6 @@ int ConnectionXTRX::WriteLMS7002MSPI(const uint32_t *data, size_t size, unsigned
         litepcie_writel(fd, CSR_LMS7002M_SPI_MOSI_ADDR, data[i]);
         litepcie_writel(fd, CSR_LMS7002M_SPI_CONTROL_ADDR, 32*LITEPCIE_SPI_LENGTH | LITEPCIE_SPI_START);
         while ((litepcie_readl(fd, CSR_LMS7002M_SPI_STATUS_ADDR) & LITEPCIE_SPI_DONE) == 0);
-        lime::debug("LMS7002 SPI write request 0x%x", data[i]);
     }
 
     return 0;
@@ -117,7 +116,6 @@ int ConnectionXTRX::ReadLMS7002MSPI(const uint32_t *data_in, uint32_t *data_out,
         litepcie_writel(fd, CSR_LMS7002M_SPI_CONTROL_ADDR, 32*LITEPCIE_SPI_LENGTH | LITEPCIE_SPI_START);
         while ((litepcie_readl(fd, CSR_LMS7002M_SPI_STATUS_ADDR) & LITEPCIE_SPI_DONE) == 0);
         data_out[i] = litepcie_readl(fd, CSR_LMS7002M_SPI_MISO_ADDR) & 0xffff;
-        lime::debug("LMS7002 SPI: read request 0x%x, response 0x%x", data_in[i], data_out[i]);
     }
 
     return 0;
@@ -126,7 +124,6 @@ int ConnectionXTRX::ReadLMS7002MSPI(const uint32_t *data_in, uint32_t *data_out,
 int ConnectionXTRX::WriteRegisters(const uint32_t *addrs, const uint32_t *vals, const size_t size)
 {
     for (unsigned i = 0; i < size; i++) {
-        lime::debug("XTRX register write 0x%x, val 0x%x", addrs[i], vals[i]);
         if (addrs[i] < CSR_BASE || addrs[i] >= CSR_BASE+0x10000L)
             return ReportError(EINVAL, "attempt to write invalid register 0x%x", addrs[i]);
         litepcie_writel(fd, addrs[i], vals[i]);
@@ -138,7 +135,6 @@ int ConnectionXTRX::WriteRegisters(const uint32_t *addrs, const uint32_t *vals, 
 int ConnectionXTRX::ReadRegisters(const uint32_t *addrs, uint32_t *vals, const size_t size)
 {
     for (unsigned i = 0; i < size; i++) {
-        lime::debug("XTRX register read 0x%x", addrs[i]);
         if (addrs[i] < CSR_BASE || addrs[i] >= CSR_BASE+0x10000L)
             return ReportError(EINVAL, "attempt to read invalid register 0x%x", addrs[i]);
         vals[i] = litepcie_readl(fd, addrs[i]);
