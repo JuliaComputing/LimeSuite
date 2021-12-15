@@ -13,6 +13,7 @@
 #include "LimeSDR.h"
 #include "LimeSDR_PCIE.h"
 #include "LimeSDR_Core.h"
+#include "FairwavesXTRX.h"
 #include "GFIR/lms_gfir.h"
 #include "IConnection.h"
 #include "dataTypes.h"
@@ -63,6 +64,8 @@ LMS7_Device* LMS7_Device::CreateDevice(const lime::ConnectionHandle& handle, LMS
         device = new LMS7_LimeNET_micro(conn,obj);
     else if (info.deviceName == lime::GetDeviceName(lime::LMS_DEV_LIMESDR_CORE_SDR))
         device = new LMS7_CoreSDR(conn,obj);
+    else if (info.deviceName == lime::GetDeviceName(lime::LMS_DEV_FAIRWAVES_XTRX))
+        device = new LMS7_FairwavesXTRX(conn,obj);
     else if (info.deviceName != lime::GetDeviceName(lime::LMS_DEV_UNKNOWN))
         device = new LMS7_LimeSDR(conn,obj);
     else
