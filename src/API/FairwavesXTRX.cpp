@@ -24,9 +24,10 @@ LMS7_FairwavesXTRX::LMS7_FairwavesXTRX(lime::IConnection* conn, LMS7_Device *obj
     //fpga->SetConnection(conn);
     // TODO: implement this for the XTRX's LiteX gateware
     //double refClk = fpga->DetectRefClk(100.6e6);
+    double refClk = 26e6;
     this->lms_list[0]->SetConnection(conn);
     //mStreamers.push_back(new lime::Streamer(fpga,lms_list[0],0));
-    //lms_list[0]->SetReferenceClk_SX(false, refClk);
+    lms_list[0]->SetReferenceClk_SX(false, refClk);
     connection = conn;
 }
 
