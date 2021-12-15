@@ -34,6 +34,7 @@ enum eLMS_DEV
     LMS_DEV_LIMENET_MICRO           = 22, //Raspberry Pi CM3(L), Ethernet, MAX10, LMS7002, 
     LMS_DEV_LIMESDR_CORE_SDR        = 23, //LMS7002, Intel Cyclone 4, RAM, GNSS
     LMS_DEV_LIMESDR_CORE_HE         = 24, //PA board
+    LMS_DEV_FAIRWAVES_XTRX          = 25, //PA board
 
     LMS_DEV_COUNT
 };
@@ -65,6 +66,7 @@ const char LMS_DEV_NAMES[][80] =
     "LimeNET-Micro",
     "LimeSDR-Core",
     "LimeSDR-Core-HE",
+    "Fairwaves-XTRX",
 };
 
 static inline const char* GetDeviceName(const eLMS_DEV device)
