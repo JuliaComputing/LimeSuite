@@ -17,7 +17,7 @@ using [LitePCIe](https://github.com/JuliaComputing/litepcie). Build
 instructions:
 
 ```
-LITEPCIE_ROOT=/path/to/litepcie cmake -DENABLE_XTRX=yes ...
+LITEPCIE_ROOT=/path/to/xtrx_julia/software cmake -DENABLE_XTRX=yes -DCMAKE_BUILD_TYPE=Debug ...
 ```
 
 ## Build Status
