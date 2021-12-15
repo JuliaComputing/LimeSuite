@@ -27,6 +27,7 @@ find_path(LITEPCIE_KERNEL_INCLUDE_DIR litepcie.h
           HINTS
             ENV LITEPCIE_ROOT
           PATH_SUFFIXES
+            kernel
             driver/kernel
             litepcie/software/kernel)
 find_path(LITEPCIE_USER_INCLUDE_DIR liblitepcie.h
@@ -34,6 +35,7 @@ find_path(LITEPCIE_USER_INCLUDE_DIR liblitepcie.h
           HINTS
             ENV LITEPCIE_ROOT
           PATH_SUFFIXES
+            user/liblitepcie
             driver/user/liblitepcie
             litepcie/software/user/liblitepcie)
 set(LITEPCIE_INCLUDE_DIR ${LITEPCIE_KERNEL_INCLUDE_DIR} ${LITEPCIE_USER_INCLUDE_DIR})
@@ -42,6 +44,7 @@ find_library(LITEPCIE_LIBRARY litepcie
              HINTS
                ENV LITEPCIE_ROOT
              PATH_SUFFIXES
+               user/liblitepcie
                driver/user/liblitepcie
                litepcie/software/user/liblitepcie)
 
