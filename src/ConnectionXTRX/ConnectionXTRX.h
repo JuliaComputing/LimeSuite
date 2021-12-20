@@ -34,6 +34,7 @@ public:
     int WriteRegisters(const uint32_t *addrs, const uint32_t *data, const size_t size) override;
     int ReadRegisters(const uint32_t *addrs, uint32_t *data, const size_t size) override;
 
+    virtual int DeviceReset(int ind = 0) override;
     DeviceInfo GetDeviceInfo(void) override;
 
 private:

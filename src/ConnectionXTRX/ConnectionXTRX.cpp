@@ -143,6 +143,13 @@ int ConnectionXTRX::ReadRegisters(const uint32_t *addrs, uint32_t *vals, const s
     return 0;
 }
 
+int ConnectionXTRX::DeviceReset(int ind)
+{
+    litepcie_writel(fd, CSR_LMS7002M_CONTROL_ADDR, 1*(1 << CSR_LMS7002M_CONTROL_RESET_OFFSET));
+    litepcie_writel(fd, CSR_LMS7002M_CONTROL_ADDR, 0*(1 << CSR_LMS7002M_CONTROL_RESET_OFFSET));
+    return 0;
+}
+
 DeviceInfo ConnectionXTRX::GetDeviceInfo(void)
 {
     DeviceInfo info;
