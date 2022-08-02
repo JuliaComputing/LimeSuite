@@ -29,6 +29,7 @@ find_path(LITEPCIE_KERNEL_INCLUDE_DIR litepcie.h
           PATH_SUFFIXES
             kernel
             driver/kernel
+            litepcie-kernel-module
             litepcie/software/kernel)
 find_path(LITEPCIE_USER_INCLUDE_DIR liblitepcie.h
           REQUIRED
@@ -37,6 +38,7 @@ find_path(LITEPCIE_USER_INCLUDE_DIR liblitepcie.h
           PATH_SUFFIXES
             user/liblitepcie
             driver/user/liblitepcie
+            litepcie-user-library/liblitepcie
             litepcie/software/user/liblitepcie)
 set(LITEPCIE_INCLUDE_DIR ${LITEPCIE_KERNEL_INCLUDE_DIR} ${LITEPCIE_USER_INCLUDE_DIR})
 find_library(LITEPCIE_LIBRARY litepcie
@@ -44,14 +46,19 @@ find_library(LITEPCIE_LIBRARY litepcie
              HINTS
                ENV LITEPCIE_ROOT
              PATH_SUFFIXES
+               litepcie-user-library
                user/liblitepcie
                driver/user/liblitepcie
                litepcie/software/user/liblitepcie)
+
+########################################################################
+## CUDA
+########################################################################
+find_package(CUDAToolkit)
 
 ########################################################################
 ## Add to library
 ########################################################################
 target_include_directories(LimeSuite PUBLIC ${LITEPCIE_INCLUDE_DIR})
 target_sources(LimeSuite PRIVATE ${CONNECTION_XTRX_SOURCES})
-target_link_libraries(LimeSuite ${LITEPCIE_LIBRARY} crypt)
-
+target_link_libraries(LimeSuite ${LITEPCIE_LIBRARY} crypt CUDA::cuda_driver)
