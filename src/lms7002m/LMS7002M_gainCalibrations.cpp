@@ -63,7 +63,8 @@ int LMS7002M::CalibrateTxGainSetup()
 
     //CGEN
     SetDefaults(CGEN);
-    status = SetFrequencyCGEN(61.44e6);
+    //status = SetFrequencyCGEN(61.44e6);
+    status = SetFrequencyCGEN(2*26.605e6);
     if(status != 0)
         return status;
 

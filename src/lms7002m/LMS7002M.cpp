@@ -125,7 +125,7 @@ LMS7002M::LMS7002M() :
     controlPort(nullptr),
     mdevIndex(0),
     mSelfCalDepth(0),
-    _cachedRefClockRate(30.72e6)
+    _cachedRefClockRate(26e6)
 {
     mCalibrationByMCU = true;
     opt_gain_tbb[0] = -1;
@@ -425,8 +425,8 @@ int LMS7002M::LoadConfigLegacyFile(const char* filename)
     {
         if (parser.select("Reference clocks"))
         {
-            this->SetReferenceClk_SX(Rx, parser.get("SXR reference frequency MHz", 30.72) * 1e6);
-            this->SetReferenceClk_SX(Tx, parser.get("SXT reference frequency MHz", 30.72) * 1e6);
+            this->SetReferenceClk_SX(Rx, parser.get("SXR reference frequency MHz", 26.605) * 1e6);
+            this->SetReferenceClk_SX(Tx, parser.get("SXT reference frequency MHz", 26.605) * 1e6);
         }
 
         if (parser.select("LMS7002 registers ch.A") == true)
@@ -674,8 +674,8 @@ int LMS7002M::LoadConfig(const char* filename)
         this->SetActiveChannel(ch);
 
         parser.select("reference_clocks");
-        this->SetReferenceClk_SX(Rx, parser.get("sxr_ref_clk_mhz", 30.72) * 1e6);
-        this->SetReferenceClk_SX(Tx, parser.get("sxt_ref_clk_mhz", 30.72) * 1e6);
+        this->SetReferenceClk_SX(Rx, parser.get("sxr_ref_clk_mhz", 26.605) * 1e6);
+        this->SetReferenceClk_SX(Tx, parser.get("sxt_ref_clk_mhz", 26.605) * 1e6);
     }
 
     ResetLogicregisters();
@@ -1209,38 +1209,57 @@ int LMS7002M::TuneCGENVCO()
     if(int status = Modify_SPI_Reg_bits (LMS7_PD_VCO_CGEN.address, 2, 1, 0) != 0)
         return status;
 
+#ifndef NDEBUG
+    // Are we powering the VCO and the comparator?
+    lime::debug("PD_VCO_CGEN: %d", Get_SPI_Reg_bits(LMS7param(PD_VCO_CGEN)));
+    lime::debug("PD_VCO_COMP_CGEN: %d", Get_SPI_Reg_bits(LMS7param(PD_VCO_COMP_CGEN)));
+    lime::debug("EN_G_CGEN: %d", Get_SPI_Reg_bits(LMS7param(EN_G_CGEN)));
+#endif
+
     auto checkCSW = [this] (int cswVal){
             Modify_SPI_Reg_bits (LMS7_CSW_VCO_CGEN, cswVal);    //write CSW value
             this_thread::sleep_for(chrono::microseconds(50)); //comparator settling time
             return Get_SPI_Reg_bits(LMS7_VCO_CMPHO_CGEN.address, 13, 12, true); //read comparators
         };
-    //find lock
-    int csw = 127;
-    for (int step = 64; step > 0; step>>=1)
+
+    int cswVal = 0;
+    for (int i = 0; i < 256; ++i)
     {
-        auto cmphl = checkCSW(csw);
-        if (cmphl == 0)
-            csw += step;
-        else if (cmphl == 3)
-            csw -= step;
-        else
+        cswVal = i;
+        auto ret = checkCSW(cswVal);
+        printf("%d: %d\n", i, ret);
+        if (ret == 2)
             break;
     }
+
+    //find lock
+    //int csw = 127;
+    //for (int step = 64; step > 0; step>>=1)
+    //{
+    //    auto cmphl = checkCSW(csw);
+    //    printf("cmphl: %d, step: %d\n", cmphl, step);
+    //    if (cmphl == 0)
+    //        csw += step;
+    //    else if (cmphl == 3)
+    //        csw -= step;
+    //    else
+    //        break;
+    //}
     //search around (+/-7) to determine lock interval
     //number of iterations could be reduced in some cases by narrowing down the search interval in find lock phase
-    int cswLow = csw, cswHigh = csw;
-    for (int step = 4; step > 0; step>>=1)
-        if (checkCSW(cswLow-step) != 0)
-            cswLow = cswLow-step;
-    for (int step = 4; step > 0; step>>=1)
-        if (checkCSW(cswHigh+step) == 2)
-            cswHigh = cswHigh+step;
-
-    lime::debug("csw %d; interval [%d, %d]", (cswHigh+cswLow)/2, cswLow, cswHigh);
-    auto cmphl = checkCSW((cswHigh+cswLow)/2);
+    //int cswLow = csw, cswHigh = csw;
+    //for (int step = 4; step > 0; step>>=1)
+    //    if (checkCSW(cswLow-step) != 0)
+    //        cswLow = cswLow-step;
+    //for (int step = 4; step > 0; step>>=1)
+    //    if (checkCSW(cswHigh+step) == 2)
+    //        cswHigh = cswHigh+step;
+//
+    //printf("csw %d; interval [%d, %d]", (cswHigh+cswLow)/2, cswLow, cswHigh);
+    auto cmphl = checkCSW(cswVal);
     if(cmphl == 2)
         return 0;
-    lime::error("TuneVCO(CGEN) - failed to lock (cmphl!=%d)", cmphl);
+    lime::error("TuneCGENVCO() - failed to lock (cmphl!=%d)", cmphl);
     return -1;
 }
 

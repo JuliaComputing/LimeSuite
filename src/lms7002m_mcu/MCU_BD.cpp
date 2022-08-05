@@ -588,7 +588,7 @@ int MCU_BD::Program_MCU(const uint8_t* buffer, const IConnection::MCU_PROG_MODE 
 #ifndef NDEBUG
     auto timeStart = std::chrono::high_resolution_clock::now();
 #endif
-    const auto timeout = std::chrono::milliseconds(100);
+    const auto timeout = std::chrono::milliseconds(1000);
     const uint32_t controlAddr = 0x0002 << 16;
     const uint32_t statusReg = 0x0003 << 16;
     const uint32_t addrDTM = 0x0004 << 16; //data to MCU

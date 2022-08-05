@@ -19,7 +19,7 @@ uint16_t gComparatorDelayCounter = 0xFF00; // ~100us @ ref 30.72MHz
 #define VERBOSE 0
 
 //TODO add functions to modify reference clock
-float_type RefClk = 30.72e6; //board reference clock
+float_type RefClk = 26.605e6; //board reference clock
 
 uint16_t pow2(const uint8_t power)
 {

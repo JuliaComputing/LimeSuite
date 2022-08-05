@@ -80,8 +80,11 @@ int ConnectionXTRX::TransactSPI(const int addr, const uint32_t *writeData, uint3
         case 0x10: return this->WriteLMS7002MSPI(writeData, size);
     }
 
-    if (readData != nullptr && addr == 0x10)
-        return this->ReadLMS7002MSPI(writeData, readData, size);
+    if (readData != nullptr && addr == 0x10) {
+        auto val = this->ReadLMS7002MSPI(writeData, readData, size);
+        printf("[TransactSPI] Asked for 0x%x, got 0x%x\n", addr, val);
+        return val;
+    }
 
     return ReportError(ENOTSUP, "unknown spi address");
 }
@@ -98,6 +101,11 @@ int ConnectionXTRX::TransactSPI(const int addr, const uint32_t *writeData, uint3
 
 int ConnectionXTRX::WriteLMS7002MSPI(const uint32_t *data, size_t size, unsigned /*periphID*/)
 {
+    //printf("[WriteLMS7002MSPI] Writing %d words\n", size);
+    //for (int i = 0; i < size; i++) {
+    //    // top bit is used to indicate write
+    //    printf("[WriteLMS7002MSPI] Writing addr:0x%x data:0x%x\n", (data[i] >> 16) & 0x7fff, data[i] & 0xffff);
+    //}
     for (unsigned i = 0; i < size; i++)
     {
         litepcie_writel(fd, CSR_LMS7002M_SPI_MOSI_ADDR, data[i]);
@@ -105,11 +113,25 @@ int ConnectionXTRX::WriteLMS7002MSPI(const uint32_t *data, size_t size, unsigned
         while ((litepcie_readl(fd, CSR_LMS7002M_SPI_STATUS_ADDR) & LITEPCIE_SPI_DONE) == 0);
     }
 
+    uint32_t data_out[size];
+    
+    int ret = ReadLMS7002MSPI(data, data_out, size);
+    //if (ret != 0) {
+    //    printf("[WriteLMS7002MSPI] read-back failed with code %d\n", ret);
+    //    return 1;
+    //}
+
+    //for (unsigned i = 0; i < size; i++){
+    //    if (data[i] != data_out[i])
+    //        printf("[WriteLMS7002MSPI] Read back failed at word %d, expected 0x%x, got 0x%x\n", i, data[i], data_out[i]);
+    //}
+
     return 0;
 }
 
 int ConnectionXTRX::ReadLMS7002MSPI(const uint32_t *data_in, uint32_t *data_out, size_t size, unsigned /*periphID*/)
 {
+    //printf("[ReadLMS7002MSPI] Reading %d words\n", size);
     for (unsigned i = 0; i < size; i++)
     {
         litepcie_writel(fd, CSR_LMS7002M_SPI_MOSI_ADDR, data_in[i]);
@@ -117,6 +139,8 @@ int ConnectionXTRX::ReadLMS7002MSPI(const uint32_t *data_in, uint32_t *data_out,
         while ((litepcie_readl(fd, CSR_LMS7002M_SPI_STATUS_ADDR) & LITEPCIE_SPI_DONE) == 0);
         data_out[i] = litepcie_readl(fd, CSR_LMS7002M_SPI_MISO_ADDR) & 0xffff;
     }
+    //for (unsigned i = 0; i < size; i++)
+    //    printf("[ReadLMS7002MSPI] Read addr:0x%x data:0x%x\n", data_in[i] >> 16, data_out[i]);
 
     return 0;
 }
