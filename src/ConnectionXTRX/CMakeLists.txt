@@ -25,31 +25,20 @@ endif()
 find_path(LITEPCIE_KERNEL_INCLUDE_DIR litepcie.h
           REQUIRED
           HINTS
-            ENV LITEPCIE_ROOT
-          PATH_SUFFIXES
-            kernel
-            driver/kernel
-            litepcie-kernel-module
-            litepcie/software/kernel)
+            "${LITEPCIE_KERNEL_MODULE_DIR}")
 find_path(LITEPCIE_USER_INCLUDE_DIR liblitepcie.h
           REQUIRED
           HINTS
-            ENV LITEPCIE_ROOT
+            "${LITEPCIE_INSTALL_PREFIX}"
           PATH_SUFFIXES
-            user/liblitepcie
-            driver/user/liblitepcie
-            litepcie-user-library/liblitepcie
-            litepcie/software/user/liblitepcie)
+            include/liblitepcie)
 set(LITEPCIE_INCLUDE_DIR ${LITEPCIE_KERNEL_INCLUDE_DIR} ${LITEPCIE_USER_INCLUDE_DIR})
 find_library(LITEPCIE_LIBRARY litepcie
              REQUIRED
              HINTS
-               ENV LITEPCIE_ROOT
+               "${LITEPCIE_INSTALL_PREFIX}"
              PATH_SUFFIXES
-               litepcie-user-library
-               user/liblitepcie
-               driver/user/liblitepcie
-               litepcie/software/user/liblitepcie)
+               lib)
 
 ########################################################################
 ## CUDA
