@@ -43,6 +43,7 @@ public:
     virtual std::vector<std::string> GetPathNames(bool dir_tx, unsigned chan = 0) const;
     virtual int SetPath(bool tx,unsigned chan, unsigned path);
     int GetPath(bool tx, unsigned chan) const;
+    void SetDigitalLoopback();
     virtual int SetFrequency(bool tx, unsigned chan, double f_Hz);
     double GetFrequency(bool tx, unsigned chan) const;
     virtual Range GetFrequencyRange(bool tx) const;

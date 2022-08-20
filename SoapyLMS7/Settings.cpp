@@ -812,6 +812,10 @@ SoapySDR::ArgInfoList SoapyLMS7::getSettingInfo(void) const
 
 void SoapyLMS7::writeSetting(const std::string &key, const std::string &value)
 {
+    if (key == "LB_LNA")
+    {
+        this->writeSetting(SOAPY_SDR_RX, 0, "LB_LNA", value);
+    }
     if (key == "RXTSP_CONST")
     {
         for (size_t channel = 0; channel < lms7Device->GetNumChannels(); channel++)
@@ -912,7 +916,12 @@ void SoapyLMS7::writeSetting(const std::string &key, const std::string &value)
         if (sampleRate[SOAPY_SDR_TX] > 0)
             setSampleRate(SOAPY_SDR_TX, 0, sampleRate[SOAPY_SDR_TX]);
     }
-
+    else if (key == "LOOPBACK_ENABLE")
+    {
+        std::unique_lock<std::recursive_mutex> lock(_accessMutex);
+        SoapySDR::logf(SOAPY_SDR_INFO, "Enable Digital Loopback: %s", value.c_str());
+        lms7Device->SetDigitalLoopback();
+    }
     else
     {
         for (size_t channel = 0; channel < lms7Device->GetNumChannels(); channel++)
@@ -977,7 +986,10 @@ void SoapyLMS7::writeSetting(const int direction, const size_t channel, const st
         lms7Device->SetTestSignal(isTx, channel, LMS_TESTSIG_DC, ampl, ampl);
         mChannels[direction].at(channel).tst_dc = ampl;
     }
-
+    else if (key == "LB_LNA")
+    {
+        lms7Device->SetGain(false, 0, std::stod(value), key);
+    }
     else if (key == "CALIBRATE_TX" or (isTx and key == "CALIBRATE"))
     {
         double bw = std::stof(value);

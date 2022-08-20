@@ -721,6 +721,21 @@ int LMS7_Device::GetPath(bool tx, unsigned chan) const
     return lms->GetPathRFE();
 }
 
+void LMS7_Device::SetDigitalLoopback() {
+    // This shouldn't be necessary as these registers don't pay attention
+    // to the MAC, but the XTRX firmware does it.
+    auto lms = lms_list[0];
+    lms->Modify_SPI_Reg_bits(LMS7param(MAC), 3);
+
+    // Set the RX mux to read from the TXFIFO, e.g. digital loopback
+    const int TXFIFO = 1;
+    lms->Modify_SPI_Reg_bits(LMS7param(RX_MUX), TXFIFO);
+
+    // Also ensure that the write clocks are synchronized between TX and RX.
+    lms->Modify_SPI_Reg_bits(LMS7param(RXWRCLK_MUX), lms->Get_SPI_Reg_bits(LMS7param(TXWRCLK_MUX)));
+}
+
+
 LMS7_Device::Range LMS7_Device::GetRxPathBand(unsigned path, unsigned chan) const
 {
   switch (path)
