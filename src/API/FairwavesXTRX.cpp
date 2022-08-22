@@ -31,7 +31,44 @@ LMS7_FairwavesXTRX::LMS7_FairwavesXTRX(lime::IConnection* conn, LMS7_Device *obj
     connection = conn;
 }
 
+void EnableLDO(lime::LMS7002M* lms, const bool enable) {
+    const int val = enable?1:0;
 
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_DIG), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_DIGGN), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_DIGSXR), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_DIGSXT), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_DIVGN), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_DIVSXR), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_DIVSXT), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_LNA12), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_LNA14), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_MXRFE), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_RBB), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_RXBUF), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_TBB), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_TIA12), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_TIA14), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_G_LDO), val);
+
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_AFE), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_CPGN), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_CPSXR), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_TLOB), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_TPAD), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_TXBUF), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_VCOGN), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_VCOSXR), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_VCOSXT), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_CPSXT), val);
+
+    lms->Modify_SPI_Reg_bits(LMS7param(EN_LOADIMP_LDO_TLOB), 1);
+    lms->Modify_SPI_Reg_bits(LMS7param(PD_LDO_DIGIp1), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(PD_LDO_DIGIp2), val);
+    lms->Modify_SPI_Reg_bits(LMS7param(PD_LDO_SPIBUF), val);
+
+    return;
+}
 
 int LMS7_FairwavesXTRX::Init()
 {
@@ -47,11 +84,7 @@ int LMS7_FairwavesXTRX::Init()
         lms->Modify_SPI_Reg_bits(LMS7param(EN_OUT2_XBUF_TX),1);
         lms->Modify_SPI_Reg_bits(LMS7param(EN_TBUFIN_XBUF_RX),1);
 
-        lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_TXBUF), 1);
-        lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_RXBUF), 1);
-        lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_DIGSXR), 1);
-        lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_DIVGN), 1);
-        lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_CPSXT), 1);
+        EnableLDO(lms, true);
 
         if(lms->CalibrateTxGain(0,nullptr) != 0)
             return -1;
