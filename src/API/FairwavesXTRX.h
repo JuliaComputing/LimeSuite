@@ -14,6 +14,7 @@ class LMS7_FairwavesXTRX : public LMS7_Device
 {
 public:
     LMS7_FairwavesXTRX(lime::IConnection* conn, LMS7_Device *obj = nullptr);
+    int Init() override;
 };
 
 }
