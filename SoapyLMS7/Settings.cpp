@@ -15,6 +15,16 @@
 #include <SoapySDR/Time.hpp>
 #include <cstdlib>
 #include <algorithm>
+#include <fstream>
+#include <sys/mman.h>
+#include <mutex>
+#include <cstring>
+#include <cstdlib>
+#include <stdexcept>
+#include <iostream>
+#include <fcntl.h>    /* For O_RDWR */
+#include <unistd.h>   /* For open(), creat() */
+
 
 using namespace lime;
 
@@ -27,6 +37,20 @@ using namespace lime;
 //reasonable step between sample rates
 #define STEP_SAMP_RATE 5e5
 
+void dma_init_cpu(int fd) {
+    struct litepcie_ioctl_dma_init m;
+    m.use_gpu = 0;
+    checked_ioctl(fd, LITEPCIE_IOCTL_DMA_INIT, &m);
+}
+
+void dma_init_gpu(int fd, void *addr, size_t size) {
+    struct litepcie_ioctl_dma_init m;
+    m.use_gpu = 1;
+    m.gpu_addr = (uint64_t)addr;
+    m.gpu_size = size;
+    checked_ioctl(fd, LITEPCIE_IOCTL_DMA_INIT, &m);
+}
+
 /*******************************************************************
  * Constructor/destructor
  ******************************************************************/
@@ -34,6 +58,7 @@ SoapyLMS7::SoapyLMS7(const ConnectionHandle &handle, const SoapySDR::Kwargs &arg
     _deviceArgs(args),
     _moduleName(handle.module),
     sampleRate{0.0, 0.0},
+     _fd(-1),
     oversampling(0)   //auto
 {
     //connect
@@ -42,6 +67,68 @@ SoapyLMS7::SoapyLMS7(const ConnectionHandle &handle, const SoapySDR::Kwargs &arg
     lms7Device = LMS7_Device::CreateDevice(handle);
     if (lms7Device == nullptr) throw std::runtime_error(
         "Failed to make connection with '" + handle.serialize() + "'");
+
+    SoapySDR::logf(SOAPY_SDR_INFO, "Setting up DMA");
+    // open LitePCIe descriptor
+    //  TODO: configurable device number?
+    _fd = open("/dev/litepcie0", O_RDWR);
+    if (_fd < 0)
+        throw std::runtime_error(
+            "SoapyXTRX(): failed to open /dev/litepcie0");
+
+    // reset the LMS7002M
+    litepcie_writel(_fd, CSR_LMS7002M_CONTROL_ADDR,
+        1 * (1 << CSR_LMS7002M_CONTROL_RESET_OFFSET)
+    );
+    litepcie_writel(_fd, CSR_LMS7002M_CONTROL_ADDR,
+        0 * (1 << CSR_LMS7002M_CONTROL_RESET_OFFSET)
+    );
+
+    // reset XTRX-specific LMS7002M controls
+    litepcie_writel(_fd, CSR_LMS7002M_CONTROL_ADDR,
+        0 * (1 << CSR_LMS7002M_CONTROL_POWER_DOWN_OFFSET) |
+        1 * (1 << CSR_LMS7002M_CONTROL_TX_ENABLE_OFFSET)  |
+        1 * (1 << CSR_LMS7002M_CONTROL_RX_ENABLE_OFFSET)  |
+        0 * (1 << CSR_LMS7002M_CONTROL_TX_RX_LOOPBACK_ENABLE_OFFSET)
+    );
+
+    // reset other FPGA peripherals
+    litepcie_writel(_fd, CSR_LMS7002M_TX_PATTERN_CONTROL_ADDR,
+        0 * (1 << CSR_LMS7002M_TX_PATTERN_CONTROL_ENABLE_OFFSET)
+    );
+    litepcie_writel(_fd, CSR_LMS7002M_RX_PATTERN_CONTROL_ADDR,
+        0 * (1 << CSR_LMS7002M_RX_PATTERN_CONTROL_ENABLE_OFFSET)
+    );
+
+    // set-up the DMA
+    checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
+    _dma_target = TargetDevice::CPU;
+    if (args.count("device") != 0) {
+        if (args.at("device") == "CPU")
+            _dma_target = TargetDevice::CPU;
+        else if (args.at("device") == "GPU")
+            _dma_target = TargetDevice::GPU;
+        else
+            throw std::runtime_error("invalid device");
+    }
+    switch (_dma_target) {
+    case TargetDevice::CPU:
+        dma_init_cpu(_fd);
+        _dma_buf = NULL;
+        break;
+    case TargetDevice::GPU:
+        size_t dma_buffer_total_size =
+            _dma_mmap_info.dma_tx_buf_count * _dma_mmap_info.dma_tx_buf_size +
+            _dma_mmap_info.dma_rx_buf_count * _dma_mmap_info.dma_rx_buf_size;
+        checked_cuda_call(
+            cuMemAlloc((CUdeviceptr *)&_dma_buf, dma_buffer_total_size));
+
+        unsigned int flag = 1;
+        checked_cuda_call(cuPointerSetAttribute(
+            &flag, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, (CUdeviceptr)_dma_buf));
+
+        dma_init_gpu(_fd, _dma_buf, dma_buffer_total_size);
+    }
 
     const auto devInfo = lms7Device->GetInfo();
     //quick summary
@@ -437,8 +524,8 @@ void SoapyLMS7::setSampleRate(const int direction, const size_t channel, const d
 {
     std::unique_lock<std::recursive_mutex> lock(_accessMutex);
     auto streams = activeStreams;
-    for (auto s : streams)
-        deactivateStream(s);
+    //for (auto s : streams)
+    //    deactivateStream(s);
 
     SoapySDR::logf(SOAPY_SDR_DEBUG, "setSampleRate(%s, %d, %g MHz)", dirName, int(channel), rate/1e6);
     auto ret = lms7Device->SetRate(direction == SOAPY_SDR_TX, rate, oversampling);
@@ -453,8 +540,8 @@ void SoapyLMS7::setSampleRate(const int direction, const size_t channel, const d
         setBBLPF(direction, channel, bw);
     }
 
-    for (auto s : streams)
-        activateStream(s);
+    //for (auto s : streams)
+    //    activateStream(s);
     if (ret != 0)
     {
         SoapySDR::logf(SOAPY_SDR_ERROR, "setSampleRate(%s, %d, %g MHz) Failed", dirName, int(channel), rate/1e6);

@@ -11,6 +11,12 @@
 #include <map>
 #include <set>
 #include "Streamer.h"
+#include "liblitepcie.h"
+
+#define BYTES_PER_SAMPLE 2 // TODO validate this 
+
+
+enum class TargetDevice { CPU, GPU };
 
 namespace lime
 {
@@ -52,26 +58,29 @@ public:
 
     SoapySDR::ArgInfoList getStreamArgsInfo(const int direction, const size_t channel) const;
 
-    SoapySDR::Stream *setupStream(
-        const int direction,
-        const std::string &format,
-        const std::vector<size_t> &channels = std::vector<size_t>(),
-        const SoapySDR::Kwargs &args = SoapySDR::Kwargs());
+    SoapySDR::Stream *setupStream(const int direction,
+                                  const std::string &format,
+                                  const std::vector<size_t> &channels,
+                                  const SoapySDR::Kwargs &);
+    void closeStream(SoapySDR::Stream *stream) override;
+    int activateStream(SoapySDR::Stream *stream, const int flags,
+                       const long long timeNs, const size_t numElems) override;
+    int deactivateStream(SoapySDR::Stream *stream, const int flags,
+                         const long long timeNs) override;
 
-    void closeStream(SoapySDR::Stream *stream);
-
-    size_t getStreamMTU(SoapySDR::Stream *stream) const;
-
-    int activateStream(
-        SoapySDR::Stream *stream,
-        const int flags = 0,
-        const long long timeNs = 0,
-        const size_t numElems = 0);
-
-    int deactivateStream(
-        SoapySDR::Stream *stream,
-        const int flags = 0,
-        const long long timeNs = 0);
+    size_t getStreamMTU(SoapySDR::Stream *stream) const override;
+    size_t getNumDirectAccessBuffers(SoapySDR::Stream *stream) override;
+    int getDirectAccessBufferAddrs(SoapySDR::Stream *stream,
+                                   const size_t handle, void **buffs) override;
+    int acquireReadBuffer(SoapySDR::Stream *stream, size_t &handl,
+                          const void **buffs, int &flags, long long &timeNs,
+                          const long timeoutUs) override;
+    void releaseReadBuffer(SoapySDR::Stream *stream, size_t handle) override;
+    int acquireWriteBuffer(SoapySDR::Stream *stream, size_t &handle,
+                           void **buffs, const long timeoutUs) override;
+    void releaseWriteBuffer(SoapySDR::Stream *stream, size_t handle,
+                            const size_t numElems, int &flags,
+                            const long long timeNs = 0) override;
 
     int readStream(
         SoapySDR::Stream *stream,
@@ -79,30 +88,16 @@ public:
         const size_t numElems,
         int &flags,
         long long &timeNs,
-        const long timeoutUs = 100000);
+        const long timeoutUs = 100000 );
 
-    int _readStreamAligned(
-        IConnectionStream *stream,
-        char * const *buffs,
-        size_t numElems,
-        uint64_t requestTime,
-        lime::StreamChannel::Metadata &mdOut,
-        const long timeoutMs);
 
     int writeStream(
-        SoapySDR::Stream *stream,
-        const void * const *buffs,
-        const size_t numElems,
-        int &flags,
-        const long long timeNs = 0,
-        const long timeoutUs = 100000);
-
-    int readStreamStatus(
-        SoapySDR::Stream *stream,
-        size_t &chanMask,
-        int &flags,
-        long long &timeNs,
-        const long timeoutUs = 100000);
+            SoapySDR::Stream *stream,
+            const void * const *buffs,
+            const size_t numElems,
+            int &flags,
+            const long long timeNs = 0,
+            const long timeoutUs = 100000);
 
     /*******************************************************************
      * Antenna API
@@ -276,6 +271,61 @@ public:
     unsigned readGPIODir(const std::string &bank) const;
 
 private:
+
+    SoapySDR::Stream *const TX_STREAM = (SoapySDR::Stream *)0x1;
+    SoapySDR::Stream *const RX_STREAM = (SoapySDR::Stream *)0x2;
+
+    struct litepcie_ioctl_mmap_dma_info _dma_mmap_info;
+    TargetDevice _dma_target;
+    void *_dma_buf;
+
+    struct Stream {
+        Stream() : opened(false) {}
+
+        bool opened;
+        void *buf;
+        struct pollfd fds;
+        int64_t hw_count, sw_count, user_count;
+
+        int32_t remainderHandle;
+        size_t remainderSamps;
+        size_t remainderOffset;
+        int8_t* remainderBuff;
+        std::string format;
+    };
+
+    struct RXStream: Stream {
+        uint32_t vga_gain;
+        uint32_t lna_gain;
+        uint8_t amp_gain;
+        double samplerate;
+        uint32_t bandwidth;
+        uint64_t frequency;
+
+        bool overflow;
+    };
+
+    struct TXStream: Stream {
+        uint32_t vga_gain;
+        uint8_t amp_gain;
+        double samplerate;
+        uint32_t bandwidth;
+        uint64_t frequency;
+        bool bias;
+
+        bool underflow;
+
+        bool burst_end;
+        int32_t burst_samps;
+    } ;
+
+    RXStream _rx_stream;
+    TXStream _tx_stream;
+
+    int _fd;
+
+    // register protection
+    std::mutex _mutex;
 
     struct Channel{
         Channel():freq(-1),bw(-1),rf_bw(-1),cal_bw(-1),gfir_bw(-1),tst_dc(0){};

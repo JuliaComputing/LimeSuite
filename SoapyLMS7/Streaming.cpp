@@ -14,6 +14,10 @@
 #include <algorithm> //min/max
 #include "Logger.h"
 #include "Streamer.h"
+#include <chrono>
+#include <cassert>
+#include <thread>
+#include <sys/mman.h>
 
 using namespace lime;
 
@@ -109,415 +113,479 @@ SoapySDR::ArgInfoList SoapyLMS7::getStreamArgsInfo(const int direction, const si
     return argInfos;
 }
 
-/*******************************************************************
- * Stream config
- ******************************************************************/
-SoapySDR::Stream *SoapyLMS7::setupStream(
-    const int direction,
-    const std::string &format,
-    const std::vector<size_t> &channels,
-    const SoapySDR::Kwargs &args)
-{
-    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
-    //store result into opaque stream object
-    auto stream = new IConnectionStream;
-    stream->direction = direction;
-    stream->elemSize = SoapySDR::formatToSize(format);
-    stream->hasCmd = false;
-    stream->skipCal = args.count("skipCal") != 0 and args.at("skipCal") == "true";
 
-    StreamConfig config;
-    config.align = args.count("alignPhase") != 0 and args.at("alignPhase") == "true";
-    config.isTx = (direction == SOAPY_SDR_TX);
-    config.performanceLatency = 0.5;
-    config.bufferLength = 0; //auto
+SoapySDR::Stream *SoapyLMS7::setupStream(const int direction,
+                                         const std::string &format,
+                                         const std::vector<size_t> &channels,
+                                         const SoapySDR::Kwargs &) {
+    std::lock_guard<std::mutex> lock(_mutex);
 
-    //default to channel 0, if none were specified
-    const std::vector<size_t> &channelIDs = channels.empty() ? std::vector<size_t>{0} : channels;
-    for(size_t i=0; i<channelIDs.size(); ++i)
-    {
-        config.channelID = channelIDs[i];
+    if (direction == SOAPY_SDR_RX) {
+        if (_rx_stream.opened)
+            throw std::runtime_error("RX stream already opened");
 
-        if (format == SOAPY_SDR_CF32) config.format = StreamConfig::FMT_FLOAT32;
-        else if (format == SOAPY_SDR_CS16) config.format = StreamConfig::FMT_INT16;
-        else if (format == SOAPY_SDR_CS12) config.format = StreamConfig::FMT_INT12;
-        else throw std::runtime_error("SoapyLMS7::setupStream(format="+format+") unsupported stream format");
+        // configure the file descriptor watcher
+        _rx_stream.fds.fd = _fd;
+        _rx_stream.fds.events = POLLIN;
 
-        config.linkFormat = config.format == StreamConfig::FMT_FLOAT32 ? StreamConfig::FMT_INT16 : config.format;
+        // initialize the DMA engine
+        if ((litepcie_request_dma(_fd, 0, 1) == 0))
+            throw std::runtime_error("DMA not available");
 
-        // optional link format
-        if(args.count("linkFormat"))
-        {
-            auto linkFormat = args.at("linkFormat");
-            if(linkFormat == SOAPY_SDR_CS16) config.linkFormat = StreamConfig::FMT_INT16;
-            else if(linkFormat == SOAPY_SDR_CS12) config.linkFormat = StreamConfig::FMT_INT12;
-            else throw std::runtime_error("SoapyLMS7::setupStream(linkFormat="+linkFormat+") unsupported link format");
-        }
+        // mmap the DMA buffers
+        _rx_stream.buf = mmap(NULL,
+                              _dma_mmap_info.dma_rx_buf_count *
+                                  _dma_mmap_info.dma_rx_buf_size,
+                              PROT_READ | PROT_WRITE, MAP_SHARED, _fd,
+                              _dma_mmap_info.dma_rx_buf_offset);
+        if (_rx_stream.buf == MAP_FAILED)
+            throw std::runtime_error("MMAP failed");
 
-        //optional buffer length if specified (from device args)
-        const auto devArgsBufferLength = _deviceArgs.find(config.isTx?"txBufferLength":"rxBufferLength");
-        if (devArgsBufferLength != _deviceArgs.end())
-        {
-            config.bufferLength = std::stoul(devArgsBufferLength->second);
-        }
+        // make sure the DMA is disabled, or counters could be in a bad state
+        litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
 
-        //optional buffer length if specified (takes precedent)
-        if (args.count("bufferLength") != 0)
-        {
-            config.bufferLength = std::stoul(args.at("bufferLength"));
-        }
+        _rx_stream.opened = true;
 
-        //optional packets latency, 1-maximum throughput, 0-lowest latency
-        if (args.count("latency") != 0)
-        {
-            config.performanceLatency = std::stof(args.at("latency"));
-            if(config.performanceLatency<0)
-                config.performanceLatency = 0;
-            else if(config.performanceLatency > 1)
-                config.performanceLatency = 1;
-        }
+        _rx_stream.format = format;
 
-        //create the stream
-        StreamChannel* streamID = lms7Device->SetupStream(config);
-        if (streamID == 0)
-            throw std::runtime_error("SoapyLMS7::setupStream() failed: " + std::string(GetLastErrorMessage()));
-        stream->streamID.push_back(streamID);
-        stream->elemMTU = streamID->GetStreamSize();
+        return RX_STREAM;
+    } else if (direction == SOAPY_SDR_TX) {
+        if (_tx_stream.opened)
+            throw std::runtime_error("TX stream already opened");
+
+        // configure the file descriptor watcher
+        _tx_stream.fds.fd = _fd;
+        _tx_stream.fds.events = POLLOUT;
+
+        // initialize the DMA engine
+        if ((litepcie_request_dma(_fd, 1, 0) == 0))
+            throw std::runtime_error("DMA not available");
+
+        // mmap the DMA buffers
+        _tx_stream.buf = mmap(
+            NULL,
+            _dma_mmap_info.dma_tx_buf_count * _dma_mmap_info.dma_tx_buf_size,
+            PROT_WRITE, MAP_SHARED, _fd, _dma_mmap_info.dma_tx_buf_offset);
+        if (_tx_stream.buf == MAP_FAILED)
+            throw std::runtime_error("MMAP failed");
+
+        // make sure the DMA is disabled, or counters could be in a bad state
+        litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
+
+        _tx_stream.opened = true;
+
+        _rx_stream.format = format;
+
+        return TX_STREAM;
+    } else {
+        throw std::runtime_error("Invalid direction");
     }
-
-    //calibrate these channels when activated
-    for (const auto &ch : channelIDs)
-    {
-        _channelsToCal.emplace(direction, ch);
-    }
-    return (SoapySDR::Stream *)stream;
 }
 
-void SoapyLMS7::closeStream(SoapySDR::Stream *stream)
-{
-    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
-    auto icstream = (IConnectionStream *)stream;
-    const auto &streamID = icstream->streamID;
+void SoapyLMS7::closeStream(SoapySDR::Stream *stream) {
+    std::lock_guard<std::mutex> lock(_mutex);
 
-    //disable stream if left enabled
-    for(auto i : streamID)
-        i->Stop();
+    if (stream == RX_STREAM) {
+        // release the DMA engine
+        litepcie_release_dma(_fd, 0, 1);
 
-    for(auto i : streamID)
-        lms7Device->DestroyStream(i);
+        munmap(_rx_stream.buf, _dma_mmap_info.dma_rx_buf_size *
+                                   _dma_mmap_info.dma_rx_buf_count);
+        _rx_stream.opened = false;
+    } else if (stream == TX_STREAM) {
+        // release the DMA engine
+        litepcie_release_dma(_fd, 1, 0);
+
+        munmap(_tx_stream.buf, _dma_mmap_info.dma_tx_buf_size *
+                                   _dma_mmap_info.dma_tx_buf_count);
+        _tx_stream.opened = false;
+    }
 }
 
-size_t SoapyLMS7::getStreamMTU(SoapySDR::Stream *stream) const
-{
-    auto icstream = (IConnectionStream *)stream;
-    return icstream->elemMTU;
-}
-
-int SoapyLMS7::activateStream(
-    SoapySDR::Stream *stream,
-    const int flags,
-    const long long timeNs,
-    const size_t numElems)
-{
-    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
-    auto icstream = (IConnectionStream *)stream;
-    const auto &streamID = icstream->streamID;
-    if (sampleRate[SOAPY_SDR_TX] == 0.0 && sampleRate[SOAPY_SDR_RX] == 0.0)
-        throw std::runtime_error("SoapyLMS7::activateStream() - the sample rate has not been configured!");
-    if (sampleRate[SOAPY_SDR_RX] <= 0.0)
-        sampleRate[SOAPY_SDR_RX] = lms7Device->GetRate(LMS_CH_RX, 0);
-    //perform self calibration with current bandwidth settings
-    //this is for the set-it-and-forget-it style of use case
-    //where boards are configured, the stream is setup,
-    //and the configuration is maintained throughout the run
-    while (not _channelsToCal.empty() and not icstream->skipCal)
-    {
-        bool dir  = _channelsToCal.begin()->first;
-        auto ch  = _channelsToCal.begin()->second;
-        auto bw = mChannels[dir].at(ch).rf_bw > 0 ? mChannels[dir].at(ch).rf_bw : sampleRate[dir];
-        bw = bw>2.5e6 ? bw : 2.5e6;
-        lms7Device->Calibrate(dir== SOAPY_SDR_TX, ch, bw, 0);
-        mChannels[dir].at(ch).cal_bw = bw;
-        _channelsToCal.erase(_channelsToCal.begin());
+int SoapyLMS7::activateStream(SoapySDR::Stream *stream, const int flags,
+                              const long long timeNs, const size_t numElems) {
+    if (stream == RX_STREAM) {
+        // enable the DMA engine
+        litepcie_dma_writer(_fd, 1, &_rx_stream.hw_count, &_rx_stream.sw_count);
+        _rx_stream.user_count = 0;
+    } else if (stream == TX_STREAM) {
+        // enable the DMA engine
+        litepcie_dma_reader(_fd, 1, &_tx_stream.hw_count, &_tx_stream.sw_count);
+        _tx_stream.user_count = 0;
     }
-    //stream requests used with rx
-    icstream->flags = flags;
-    icstream->timeNs = timeNs;
-    icstream->numElems = numElems;
-    icstream->hasCmd = true;
 
-    for(auto i : streamID)
-    {
-        int status = i->Start();
-        if(status != 0) return SOAPY_SDR_STREAM_ERROR;
-    }
-    activeStreams.insert(stream);
+    // TODO: set-up the LMS7002M
+
     return 0;
 }
 
-int SoapyLMS7::deactivateStream(
-    SoapySDR::Stream *stream,
-    const int flags,
-    const long long timeNs)
-{
-    std::unique_lock<std::recursive_mutex> lock(_accessMutex);
-    auto icstream = (IConnectionStream *)stream;
-    const auto &streamID = icstream->streamID;
-    icstream->hasCmd = false;
-
-    for(auto i : streamID)
-    {
-        int status = i->Stop();
-        if(status != 0) return SOAPY_SDR_STREAM_ERROR;
+int SoapyLMS7::deactivateStream(SoapySDR::Stream *stream, const int flags,
+                                const long long timeNs) {
+    if (stream == RX_STREAM) {
+        // disable the DMA engine
+        litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
+    } else if (stream == TX_STREAM) {
+        // disable the DMA engine
+        litepcie_dma_reader(_fd, 1, &_tx_stream.hw_count, &_tx_stream.sw_count);
     }
-    activeStreams.erase(stream);
     return 0;
 }
 
+
 /*******************************************************************
- * Stream alignment helper for multiple channels
+ * Direct buffer API
  ******************************************************************/
-static inline void fastForward(
-    char *buff, size_t &numWritten, const size_t elemSize,
-    const uint64_t oldHeadTime, const uint64_t desiredHeadTime)
-{
-    const size_t numPop = std::min<size_t>(desiredHeadTime - oldHeadTime, numWritten);
-    const size_t numMove = (numWritten-numPop);
-    numWritten -= numPop;
-    std::memmove(buff, buff+(numPop*elemSize), numMove*elemSize);
+
+size_t SoapyLMS7::getStreamMTU(SoapySDR::Stream *stream) const {
+    if (stream == RX_STREAM)
+        return _dma_mmap_info.dma_rx_buf_size/4;
+    else if (stream == TX_STREAM)
+        return _dma_mmap_info.dma_tx_buf_size/4;
+    else
+        throw std::runtime_error("SoapySDR::getStreamMTU(): invalid stream");
 }
 
-int SoapyLMS7::_readStreamAligned(
-    IConnectionStream *stream,
-    char * const *buffs,
-    size_t numElems,
-    uint64_t requestTime,
-    StreamChannel::Metadata &md,
-    const long timeoutMs)
-{
-    const auto &streamID = stream->streamID;
-    const size_t elemSize = stream->elemSize;
-    std::vector<size_t> numWritten(streamID.size(), 0);
+size_t SoapyLMS7::getNumDirectAccessBuffers(SoapySDR::Stream *stream) {
+    if (stream == RX_STREAM)
+        return _dma_mmap_info.dma_rx_buf_count;
+    else if (stream == TX_STREAM)
+        return _dma_mmap_info.dma_tx_buf_count;
+    else
+        throw std::runtime_error("SoapySDR::getNumDirectAccessBuffers(): invalid stream");
+}
 
-    for (size_t i = 0; i < streamID.size(); i += (numWritten[i]>=numElems)?1:0)
-    {
-        size_t &N = numWritten[i];
-        const uint64_t expectedTime(requestTime + N);
-        if (numElems <= N)
-            continue;
-        int status = streamID[i]->Read(buffs[i]+(elemSize*N), numElems-N,&md, timeoutMs);
-        if (status == 0) return SOAPY_SDR_TIMEOUT;
-        if (status < 0) return SOAPY_SDR_STREAM_ERROR;
+int SoapyLMS7::getDirectAccessBufferAddrs(SoapySDR::Stream *stream,
+                                          const size_t handle, void **buffs) {
+    if (_dma_target == TargetDevice::CPU && stream == RX_STREAM)
+        buffs[0] =
+            (char *)_rx_stream.buf + handle * _dma_mmap_info.dma_rx_buf_size;
+    else if (_dma_target == TargetDevice::CPU && stream == TX_STREAM)
+        buffs[0] =
+            (char *)_tx_stream.buf + handle * _dma_mmap_info.dma_tx_buf_size;
+    // XXX: this is a leaky abstraction, exposing how the LitePCIe kernel driver
+    //      manages its DMA buffers. normally this is hidden behind mmap,
+    //      but we can't use its virtual addresses on the GPU.
+    //
+    //      alternatively, if we could re-map the mmap buffers into GPU address
+    //      space, we could keep everything as it is, but cuMemHostRegister
+    //      fails with INVALID_VALUE on such inputs (presumably because the
+    //      underlying pages are already pointing to physical GPU memory).
+    else if (_dma_target == TargetDevice::GPU &&
+             (stream == RX_STREAM || stream == TX_STREAM))
+        buffs[0] = (char *)_dma_buf +
+                   // Index by (tx, rx) buffer tuples
+                   handle * (_dma_mmap_info.dma_tx_buf_size +
+                             _dma_mmap_info.dma_rx_buf_size) +
+                   // Index past the tx buffer tuple element, if we want the `rx` buffer
+                   (stream == RX_STREAM ? _dma_mmap_info.dma_tx_buf_size : 0);
+    else
+        throw std::runtime_error(
+            "SoapySDR::getDirectAccessBufferAddrs(): invalid stream");
+    return 0;
+}
 
-        //update accounting
-        const size_t elemsRead = size_t(status);
-        const size_t prevN = N;
-        N += elemsRead; //num written total
+int SoapyLMS7::acquireReadBuffer(SoapySDR::Stream *stream, size_t &handle,
+                                 const void **buffs, int &flags,
+                                 long long &timeNs, const long timeoutUs) {
+    if (stream != RX_STREAM)
+        return SOAPY_SDR_STREAM_ERROR;
 
-        //unspecified request time, set the new head condition
-        if (requestTime == 0) goto updateHead;
+    // check if there are buffers available
+    int buffers_available = _rx_stream.hw_count - _rx_stream.user_count;
+    assert(buffers_available >= 0);
 
-        //good contiguous read, read again for remainder
-        if (expectedTime == md.timestamp) continue;
-
-        //request time is later, fast forward buffer
-        if (md.timestamp < expectedTime)
-        {
-            if (prevN != 0)
-            {
-                SoapySDR::log(SOAPY_SDR_ERROR, "readStream() experienced non-monotonic timestamp");
-                return SOAPY_SDR_CORRUPTION;
-            }
-            fastForward(buffs[i], N, elemSize, md.timestamp, requestTime);
-            if (i == 0 and N != 0) numElems = N; //match size on other channels
-            continue; //read again into the remaining buffer
-        }
-
-        //overflow in the middle of a contiguous buffer
-        //fast-forward all prior channels and restart loop
-        if (md.timestamp > expectedTime)
-        {
-            for (size_t j = 0; j < i; j++)
-            {
-                fastForward(buffs[j], numWritten[j], elemSize, requestTime, md.timestamp);
-            }
-            fastForward(buffs[i], N, elemSize, md.timestamp-prevN, md.timestamp);
-            i = 0; //start over at ch0
-        }
-
-        updateHead:
-        requestTime = md.timestamp;
-        numElems = elemsRead;
+    // if not, check with the DMA engine
+    if (buffers_available == 0) {
+        litepcie_dma_writer(_fd, 1, &_rx_stream.hw_count, &_rx_stream.sw_count);
+        buffers_available = _rx_stream.hw_count - _rx_stream.user_count;
     }
 
-    md.timestamp = requestTime;
-    return int(numElems);
+    // if not, wait for new buffers to arrive
+    if (buffers_available == 0) {
+        int ret = poll(&_rx_stream.fds, 1, timeoutUs / 1000);
+        if (ret < 0)
+            throw std::runtime_error(
+                "SoapyLMS7::acquireReadBuffer(): poll failed, " +
+                std::string(strerror(errno)));
+        else if (ret == 0) {
+            return SOAPY_SDR_TIMEOUT;
+        }
+
+        // get new DMA counters
+        litepcie_dma_writer(_fd, 1, &_rx_stream.hw_count,
+                            &_rx_stream.user_count);
+        buffers_available = _rx_stream.hw_count - _rx_stream.user_count;
+        assert(buffers_available > 0);
+    }
+
+
+    // get the buffer
+    int buf_offset = _rx_stream.user_count % _dma_mmap_info.dma_rx_buf_count;
+    getDirectAccessBufferAddrs(stream, buf_offset, (void **)buffs);
+
+    // update the DMA counters
+    handle = _rx_stream.user_count;
+    _rx_stream.user_count++;
+
+    // detect overflows of the underlying circular buffer
+    // NOTE: the kernel driver is more aggressive here and
+    //       treats a difference of half the count as an overflow
+    if ((_rx_stream.hw_count - _rx_stream.sw_count) >
+        _dma_mmap_info.dma_rx_buf_count) {
+        flags |= SOAPY_SDR_END_ABRUPT;
+        return SOAPY_SDR_OVERFLOW;
+    } else {
+        return getStreamMTU(stream);
+    }
 }
 
-/*******************************************************************
- * Stream API
- ******************************************************************/
+void SoapyLMS7::releaseReadBuffer(SoapySDR::Stream *stream, size_t handle) {
+    // update the DMA counters
+    struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
+    mmap_dma_update.sw_count = handle + 1;
+    checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_WRITER_UPDATE, &mmap_dma_update);
+}
+
+
+int SoapyLMS7::acquireWriteBuffer(SoapySDR::Stream *stream, size_t &handle,
+                                  void **buffs, const long timeoutUs) {
+    if (stream != TX_STREAM)
+        return SOAPY_SDR_STREAM_ERROR;
+
+    // check if there are buffers available
+    int buffers_pending = _tx_stream.user_count - _tx_stream.hw_count;
+    assert(buffers_pending <= (int)_dma_mmap_info.dma_tx_buf_count);
+
+    // if not, check with the DMA engine
+    if (buffers_pending == _dma_mmap_info.dma_tx_buf_count) {
+        litepcie_dma_reader(_fd, 1, &_tx_stream.hw_count, &_tx_stream.sw_count);
+        buffers_pending = _tx_stream.user_count - _tx_stream.hw_count;
+    }
+
+    // if not, wait for new buffers to become available
+    if (buffers_pending == _dma_mmap_info.dma_tx_buf_count) {
+        int ret = poll(&_tx_stream.fds, 1, timeoutUs / 1000);
+        if (ret < 0)
+            throw std::runtime_error(
+                "SoapyLMS7::acquireWriteBuffer(): poll failed, " +
+                std::string(strerror(errno)));
+        else if (ret == 0)
+            return SOAPY_SDR_TIMEOUT;
+
+        // get new DMA counters
+        litepcie_dma_reader(_fd, 1, &_tx_stream.hw_count,
+                            &_tx_stream.user_count);
+        buffers_pending = _tx_stream.user_count - _tx_stream.hw_count;
+        assert(buffers_pending < _dma_mmap_info.dma_tx_buf_count);
+    }
+
+    // get the buffer
+    int buf_offset = _tx_stream.user_count % _dma_mmap_info.dma_tx_buf_count;
+    getDirectAccessBufferAddrs(stream, buf_offset, buffs);
+
+    // update the DMA counters
+    handle = _tx_stream.user_count;
+    _tx_stream.user_count++;
+
+    // detect underflows
+    if (buffers_pending < 0) {
+        return SOAPY_SDR_UNDERFLOW;
+    } else { 
+        return getStreamMTU(stream);
+    }
+}
+
+void SoapyLMS7::releaseWriteBuffer(SoapySDR::Stream *stream, size_t handle,
+                                   const size_t numElems, int &flags,
+                                   const long long timeNs) {
+    // XXX: inspect user-provided numElems and flags, and act upon them?
+
+    // update the DMA counters so that the engine can submit this buffer
+    struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
+    mmap_dma_update.sw_count = handle + 1;
+    checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE, &mmap_dma_update);
+}
+
+void readbuf(int8_t *src, void *dst, uint32_t len, std::string format, size_t offset)
+{
+
+    if (format == SOAPY_SDR_CS16)
+    {
+
+        int16_t *samples_cs16 = (int16_t *)dst + offset * BYTES_PER_SAMPLE;
+        for (uint32_t i = 0; i < len; ++i)
+        {
+            samples_cs16[i * BYTES_PER_SAMPLE] = (int16_t)(src[i * BYTES_PER_SAMPLE] << 8);
+            samples_cs16[i * BYTES_PER_SAMPLE + 1] = (int16_t)(src[i * BYTES_PER_SAMPLE + 1] << 8);
+        }
+    }
+    else
+    {
+        SoapySDR_log(SOAPY_SDR_ERROR, "read format not support");
+    }
+}
+
+void writebuf(const void *src, int8_t *dst, uint32_t len, std::string format, size_t offset)
+{
+    if (format == SOAPY_SDR_CS16)
+    {
+        int16_t *samples_cs16 = (int16_t *)src + offset * BYTES_PER_SAMPLE;
+        for (uint32_t i = 0; i < len; ++i)
+        {
+            dst[i * BYTES_PER_SAMPLE] = (int8_t)(samples_cs16[i * BYTES_PER_SAMPLE] >> 8);
+            dst[i * BYTES_PER_SAMPLE + 1] = (int8_t)(samples_cs16[i * BYTES_PER_SAMPLE + 1] >> 8);
+        }
+    }
+    else
+    {
+        SoapySDR_log(SOAPY_SDR_ERROR, "write format not support");
+    }
+}
+
 int SoapyLMS7::readStream(
     SoapySDR::Stream *stream,
-    void * const *buffs,
-    size_t numElems,
+    void *const *buffs,
+    const size_t numElems,
     int &flags,
     long long &timeNs,
     const long timeoutUs)
 {
-    auto icstream = (IConnectionStream *)stream;
-
-    const auto exitTime = std::chrono::high_resolution_clock::now() + std::chrono::microseconds(timeoutUs);
-
-    //wait for a command from activate stream up to the timeout specified
-    if (not icstream->hasCmd)
+    if (stream != RX_STREAM)
     {
-        while (std::chrono::high_resolution_clock::now() < exitTime)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-        return SOAPY_SDR_TIMEOUT;
+        return SOAPY_SDR_NOT_SUPPORTED;
     }
+    /* this is the user's buffer for channel 0 */
+    size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
 
-    //handle the one packet flag by clipping
-    if ((flags & SOAPY_SDR_ONE_PACKET) != 0)
+    size_t samp_avail = 0;
+
+    if (_rx_stream.remainderHandle >= 0)
     {
-        numElems = std::min(numElems, icstream->elemMTU);
-    }
 
-    StreamChannel::Metadata metadata;
-    const uint64_t cmdTicks = ((icstream->flags & SOAPY_SDR_HAS_TIME) != 0)?SoapySDR::timeNsToTicks(icstream->timeNs, sampleRate[SOAPY_SDR_RX]):0;
-    int status = _readStreamAligned(icstream, (char * const *)buffs, numElems, cmdTicks, metadata, timeoutUs/1000);
-    if (status < 0) return status;
+        const size_t n = std::min(_rx_stream.remainderSamps, returnedElems);
 
-    //the command had a time, so we need to compare it to received time
-    if ((icstream->flags & SOAPY_SDR_HAS_TIME) != 0 and (metadata.flags & RingFIFO::SYNC_TIMESTAMP) != 0)
-    {
-        //our request time is now late, clear command and return error code
-        if (cmdTicks < metadata.timestamp)
+        if (n < returnedElems)
         {
-            icstream->hasCmd = false;
-            return SOAPY_SDR_TIME_ERROR;
+            samp_avail = n;
         }
 
-        //_readStreamAligned should guarantee this condition
-        if (cmdTicks != metadata.timestamp)
+        readbuf(_rx_stream.remainderBuff + _rx_stream.remainderOffset * BYTES_PER_SAMPLE, buffs[0], n, _rx_stream.format, 0);
+
+        _rx_stream.remainderOffset += n;
+        _rx_stream.remainderSamps -= n;
+
+        if (_rx_stream.remainderSamps == 0)
         {
-            SoapySDR::logf(SOAPY_SDR_ERROR,
-                "readStream() alignment algorithm failed\n"
-                "Request time = %lld, actual time = %lld",
-                (long long)cmdTicks, (long long)metadata.timestamp);
-            return SOAPY_SDR_STREAM_ERROR;
+
+            this->releaseReadBuffer(stream, _rx_stream.remainderHandle);
+            _rx_stream.remainderHandle = -1;
+            _rx_stream.remainderOffset = 0;
         }
 
-        icstream->flags &= ~SOAPY_SDR_HAS_TIME; //clear for next read
+        if (n == returnedElems)
+            return returnedElems;
     }
 
-    //handle finite burst request commands
-    if (icstream->numElems != 0)
+    size_t handle;
+    int ret = this->acquireReadBuffer(stream, handle, (const void **)&_rx_stream.remainderBuff, flags, timeNs, timeoutUs);
+
+    if (ret < 0)
     {
-        //Clip to within the request size when over,
-        //and reduce the number of elements requested.
-        status = std::min<size_t>(status, icstream->numElems);
-        icstream->numElems -= status;
-
-        //the burst completed, done with the command
-        if (icstream->numElems == 0)
+        if ((ret == SOAPY_SDR_TIMEOUT) && (samp_avail > 0))
         {
-            icstream->hasCmd = false;
-            metadata.flags |= RingFIFO::END_BURST;
+            return samp_avail;
         }
+        return ret;
     }
 
-    //output metadata
-    flags = 0;
-    if ((metadata.flags & RingFIFO::END_BURST) != 0) flags |= SOAPY_SDR_END_BURST;
-    if ((metadata.flags & RingFIFO::SYNC_TIMESTAMP) != 0) flags |= SOAPY_SDR_HAS_TIME;
-    timeNs = SoapySDR::ticksToTimeNs(metadata.timestamp, sampleRate[SOAPY_SDR_RX]);
+    _rx_stream.remainderHandle = handle;
+    _rx_stream.remainderSamps = ret;
 
-    //return num read or error code
-    return (status >= 0) ? status : SOAPY_SDR_STREAM_ERROR;
+    const size_t n = std::min((returnedElems - samp_avail), _rx_stream.remainderSamps);
+
+    readbuf(_rx_stream.remainderBuff, buffs[0], n, _rx_stream.format, samp_avail);
+    _rx_stream.remainderSamps -= n;
+    _rx_stream.remainderOffset += n;
+
+    if (_rx_stream.remainderSamps == 0)
+    {
+        this->releaseReadBuffer(stream, _rx_stream.remainderHandle);
+        _rx_stream.remainderHandle = -1;
+        _rx_stream.remainderOffset = 0;
+    }
+
+    return (returnedElems);
 }
 
 int SoapyLMS7::writeStream(
     SoapySDR::Stream *stream,
-    const void * const *buffs,
+    const void *const *buffs,
     const size_t numElems,
     int &flags,
     const long long timeNs,
     const long timeoutUs)
 {
-    if ((flags & SOAPY_SDR_HAS_TIME) && (timeNs <= 0))
-        return SOAPY_SDR_TIME_ERROR;
-    auto icstream = (IConnectionStream *)stream;
-    const auto &streamID = icstream->streamID;
-
-    //input metadata
-    StreamChannel::Metadata metadata;
-    metadata.timestamp = SoapySDR::timeNsToTicks(timeNs, sampleRate[SOAPY_SDR_RX]);
-    metadata.flags = (flags & SOAPY_SDR_HAS_TIME) ? lime::RingFIFO::SYNC_TIMESTAMP : 0;
-    metadata.flags |= (flags & SOAPY_SDR_END_BURST) ? lime::RingFIFO::END_BURST : 0;
-
-    //write the 0th channel: get number of samples written
-    int status = streamID[0]->Write(buffs[0], numElems, &metadata, timeoutUs/1000);
-    if (status == 0) return SOAPY_SDR_TIMEOUT;
-    if (status < 0) return SOAPY_SDR_STREAM_ERROR;
-
-    //write subsequent channels with the same size and large timeout
-    //we should always be able to do a matching buffer write quickly
-    //or there is an unknown internal issue with the stream fifo
-    for (size_t i = 1; i < streamID.size(); i++)
+    if (stream != TX_STREAM)
     {
-        int status_i = streamID[i]->Write(buffs[i], status, &metadata, 1000/*1s*/);
-        if (status_i != status)
-        {
-            SoapySDR::logf(SOAPY_SDR_ERROR, "Multi-channel stream alignment failed!");
-            return SOAPY_SDR_CORRUPTION;
-        }
+        return SOAPY_SDR_NOT_SUPPORTED;
     }
 
-    //return num written
-    return status;
-}
+    size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
 
-int SoapyLMS7::readStreamStatus(
-    SoapySDR::Stream *stream,
-    size_t &chanMask,
-    int &flags,
-    long long &timeNs,
-    const long timeoutUs)
-{
-    auto icstream = (IConnectionStream *)stream;
-    const auto &streamID = icstream->streamID;
+    size_t samp_avail = 0;
 
-    int ret = 0;
-    flags = 0;
-    lime::StreamChannel::Info metadata;
-    auto start = std::chrono::high_resolution_clock::now();
-    while (1)
+    if (_tx_stream.remainderHandle >= 0)
     {
-        for(auto i : streamID)
-        {
-            metadata = i->GetInfo();
 
-            if (metadata.droppedPackets) ret = SOAPY_SDR_TIME_ERROR;
-            else if (metadata.overrun) ret = SOAPY_SDR_OVERFLOW;
-            else if (metadata.underrun) ret = SOAPY_SDR_UNDERFLOW;
+        const size_t n = std::min(_tx_stream.remainderSamps, returnedElems);
+
+        if (n < returnedElems)
+        {
+            samp_avail = n;
         }
-        if (ret) break;
-        //check timeout
-        std::chrono::duration<double> seconds = std::chrono::high_resolution_clock::now()-start;
-        if (seconds.count()> (double)timeoutUs/1e6)
-            return SOAPY_SDR_TIMEOUT;
-        //sleep to avoid high CPU load
-        if (timeoutUs >= 1000000)
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        else
-            std::this_thread::sleep_for(std::chrono::microseconds(timeoutUs));
+
+        writebuf(buffs[0], _tx_stream.remainderBuff + _tx_stream.remainderOffset * BYTES_PER_SAMPLE, n, _tx_stream.format, 0);
+        _tx_stream.remainderSamps -= n;
+        _tx_stream.remainderOffset += n;
+
+        if (_tx_stream.remainderSamps == 0)
+        {
+            this->releaseWriteBuffer(stream, _tx_stream.remainderHandle, _tx_stream.remainderOffset, flags, timeNs);
+            _tx_stream.remainderHandle = -1;
+            _tx_stream.remainderOffset = 0;
+        }
+
+        if (n == returnedElems)
+            return returnedElems;
     }
 
-    timeNs = SoapySDR::ticksToTimeNs(metadata.timestamp, sampleRate[SOAPY_SDR_RX]);
-    //output metadata
-    flags |= SOAPY_SDR_HAS_TIME;
-    return ret;
+    size_t handle;
+
+    int ret = this->acquireWriteBuffer(stream, handle, (void **)&_tx_stream.remainderBuff, timeoutUs);
+    if (ret < 0)
+    {
+        if ((ret == SOAPY_SDR_TIMEOUT) && (samp_avail > 0))
+        {
+            return samp_avail;
+        }
+        return ret;
+    }
+
+    _tx_stream.remainderHandle = handle;
+    _tx_stream.remainderSamps = ret;
+
+    const size_t n = std::min((returnedElems - samp_avail), _tx_stream.remainderSamps);
+
+    writebuf(buffs[0], _tx_stream.remainderBuff, n, _tx_stream.format, samp_avail);
+    _tx_stream.remainderSamps -= n;
+    _tx_stream.remainderOffset += n;
+
+    if (_tx_stream.remainderSamps == 0)
+    {
+        this->releaseWriteBuffer(stream, _tx_stream.remainderHandle, _tx_stream.remainderOffset, flags, timeNs);
+        _tx_stream.remainderHandle = -1;
+        _tx_stream.remainderOffset = 0;
+    }
+
+    return returnedElems;
 }
