@@ -47,8 +47,11 @@ int LMS7_FairwavesXTRX::Init()
         lms->Modify_SPI_Reg_bits(LMS7param(EN_OUT2_XBUF_TX),1);
         lms->Modify_SPI_Reg_bits(LMS7param(EN_TBUFIN_XBUF_RX),1);
 
-        lms->SPI_write(0x0092, 0xFFFF, true); // default 0x0001
-        lms->SPI_write(0x0093, 0x03FF, true); // default 0x0000
+        lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_TXBUF), 1);
+        lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_RXBUF), 1);
+        lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_DIGSXR), 1);
+        lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_DIVGN), 1);
+        lms->Modify_SPI_Reg_bits(LMS7param(EN_LDO_CPSXT), 1);
 
         if(lms->CalibrateTxGain(0,nullptr) != 0)
             return -1;
