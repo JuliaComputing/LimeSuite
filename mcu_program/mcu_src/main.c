@@ -1,4 +1,4 @@
-#include "LMS7002_REGx51.h"
+#include "lms7002_regx51.h"
 #include "spi.h"
 #include "lms7002m_calibrations.h"
 #include "lms7002m_filters.h"
@@ -37,7 +37,7 @@ void UpdateFreq(bool refClk)
     P1 = MCU_IDLE;
 }
 
-void ext2_int() interrupt 7
+void ext2_int() __interrupt(7)
 {
     uint8_t i;
     P1 = MCU_WORKING;
@@ -47,7 +47,7 @@ void ext2_int() interrupt 7
     P1 = MCU_IDLE;
 }
 
-void ext3_int() interrupt 8
+void ext3_int() __interrupt(8)
 {
     P1 = MCU_WORKING;
     currentInstruction = P0;

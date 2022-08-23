@@ -19,12 +19,21 @@ uint16_t gComparatorDelayCounter = 0xFF00; // ~100us @ ref 30.72MHz
 #define VERBOSE 0
 
 //TODO add functions to modify reference clock
-float_type RefClk = 30.72e6; //board reference clock
+float_type RefClk = 26e6; //board reference clock
 
 uint16_t pow2(const uint8_t power)
 {
     return 1 << power;
 }
+
+// abs for int16_t
+int16_t abs_int16(int16_t value)
+{
+    if(value < 0)
+        return -value;
+    return value;
+}
+
 
 xdata uint16_t x0020state;
 ROM const uint16_t chipStateAddr[] = {
@@ -266,7 +275,7 @@ uint8_t SetFrequencySX(const bool tx, const float_type freq_Hz)
                 tuneScore[sel_vco] = Get_SPI_Reg_bits(CSW_VCO)-128;
                 canDeliverFrequency = true;
             }
-            if(abs(tuneScore[sel_vco]) < abs(tuneScore[bestvco]))
+            if(abs_int16(tuneScore[sel_vco]) < abs_int16(tuneScore[bestvco]))
                 bestvco = sel_vco;
         }
         if(canDeliverFrequency)

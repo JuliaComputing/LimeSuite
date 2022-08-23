@@ -184,7 +184,7 @@ uint8_t RunAGC(uint32_t wantedRSSI)
             else
                 LNA_gain_available = 15-gainLNA[ch];
 
-            dBdiff = 20*log10((float)wantedRSSI/rssi);
+            dBdiff = 20*log10f((float)wantedRSSI/rssi);
             if (dBdiff < 0 && rssi > 0x14000)
             {
                 gainPGA[ch] = clamp(gainPGA[ch] - 12, 0, 31);

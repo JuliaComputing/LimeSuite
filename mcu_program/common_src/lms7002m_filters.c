@@ -220,7 +220,7 @@ uint8_t TuneRxFilterSetup(const float_type rx_lpf_IF)
         Modify_SPI_Reg_bits(RCOMP_TIA_RFE, clamp(15-cfb_tia_rfe/100, 0, 15));
     }
     {
-        const int8_t rcc_ctl_pga_rbb = (430 * pow(0.65, g_pga_rbb/10) - 110.35)/20.45 + 16;
+        const int8_t rcc_ctl_pga_rbb = (430 * powf(0.65, g_pga_rbb/10) - 110.35)/20.45 + 16;
         SPI_write(0x011A, rcc_ctl_pga_rbb<<9 | GetValueOf_c_ctl_pga_rbb(g_pga_rbb));
     }
 
@@ -316,7 +316,7 @@ uint8_t TuneRxFilter(const float_type rx_lpf_freq_RF)
     ChangeUntilReachRSSI(&paramTX, 0x2700);
     }
 
-    rssi_3dB = GetRSSI() * 0.7071 * pow(10, (-0.0018 * rx_lpf_IF/1e6)/20);
+    rssi_3dB = GetRSSI() * 0.7071 * powf(10, (-0.0018 * rx_lpf_IF/1e6)/20);
 
     if(rx_lpf_IF <= 54e6)
     {
@@ -529,9 +529,9 @@ uint8_t TuneTxFilterSetup(const float_type tx_lpf_IF)
     {
         const float_type freq = (16.0/20.0)*tx_lpf_IF/1e6;
         int16_t rcal_lpflad_tbb =
-              pow(freq, 4)*1.29858903647958e-16
-            + pow(freq, 3)*(-0.000110746929967704)
-            + pow(freq, 2)*0.00277593485991029
+              powf(freq, 4)*1.29858903647958e-16
+            + powf(freq, 3)*(-0.000110746929967704)
+            + powf(freq, 2)*0.00277593485991029
             + freq*21.0384293169607
             + (-48.4092606238297);
         Modify_SPI_Reg_bits(RCAL_LPFLAD_TBB, clamp(rcal_lpflad_tbb, 0, 255));
@@ -539,9 +539,9 @@ uint8_t TuneTxFilterSetup(const float_type tx_lpf_IF)
     else
     {
         const float_type freq = tx_lpf_IF/1e6;
-        int16_t rcal_lpfh_tbb = pow(freq, 4)*1.10383261611112e-06
-            + pow(freq, 3)*(-0.000210800032517545)
-            + pow(freq,2)*0.0190494874803309
+        int16_t rcal_lpfh_tbb = powf(freq, 4)*1.10383261611112e-06
+            + powf(freq, 3)*(-0.000210800032517545)
+            + powf(freq,2)*0.0190494874803309
             + freq*1.43317445923528
             + (-47.6950779298333);
         Modify_SPI_Reg_bits(RCAL_LPFH_TBB, clamp(rcal_lpfh_tbb, 0, 255));

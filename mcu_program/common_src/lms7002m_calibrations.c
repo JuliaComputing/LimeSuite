@@ -94,6 +94,15 @@ int16_t clamp(int16_t value, int16_t minBound, int16_t maxBound)
     return value;
 }
 
+// abs for int16_t
+int16_t abs_int16(int16_t value)
+{
+    if(value < 0)
+        return -value;
+    return value;
+}
+
+
 static void FlipRisingEdge(const uint16_t addr, const uint8_t bits)
 {
     Modify_SPI_Reg_bits(addr, bits, 0);
@@ -336,10 +345,10 @@ static void WriteAnalogDC(const uint16_t addr, int16_t value)
     if(value < 0)
     {
         regValue |= (mask+1);
-        regValue |= (abs(value+mask) & mask);
+        regValue |= (abs_int16(value+mask) & mask);
     }
     else
-        regValue |= (abs(value+mask+1) & mask);
+        regValue |= (abs_int16(value+mask+1) & mask);
     SPI_write(addr, regValue);
     SPI_write(addr, regValue | 0x8000);
 }
