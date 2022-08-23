@@ -896,7 +896,7 @@ void SoapyLMS7::writeSetting(const std::string &key, const std::string &value)
         }
     }
 
-    else if (key == "SAVE_CONFIG")
+    else if (key == "SAVE_CONFIG" || key == "DUMP_INI")
     {
         std::unique_lock<std::recursive_mutex> lock(_accessMutex);
         lms7Device->SaveConfig(value.c_str());
