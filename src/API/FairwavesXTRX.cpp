@@ -129,7 +129,7 @@ int LMS7_FairwavesXTRX::Init()
         {0x0087, 0x6276},
         {0x0088, 0x0617},
         {0x0089, 0x1078},
-        {0x008b, 0x2192},
+        {0x008b, 0x2186}, // Pathfinder LMS7 driver: 0x2186, Oldbeast LM7 driver: 0x2192
         {0x0101, 0x7800},
         {0x0108, 0x958c},
         {0x0113, 0x03c3},
@@ -167,7 +167,7 @@ int LMS7_FairwavesXTRX::Init()
         {0x0122, 0x2514}, // lms_device: 0x0514, mini and default: 0x0514, xtrx repo: 0x2514
         {0x0123, 0x067b}, // Comperator, lms_device: 0x200F, mini: 0x000F, xtrx repo and default: 0x067b
     };
-    
+
 
     for (unsigned i = 0; i < lms_list.size(); i++)
     {
