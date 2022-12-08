@@ -24,6 +24,7 @@ public:
     int Open(const unsigned index);
     void Close();
     bool IsOpen();
+    int getFileDescriptor(void) override;
 
     // Serial API
     int TransactSPI(const int addr, const uint32_t *writeData, uint32_t *readData, const size_t size) override;
