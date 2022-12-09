@@ -1,7 +1,6 @@
 ########################################################################
 ## Create lime-suite project
-########################################################################
-cmake_policy(SET CMP0074 NEW)
+#######################################################################
 cmake_minimum_required(VERSION 3.1.3)
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo" CACHE STRING INTERNAL FORCE)
 project("LimeSuite")
@@ -18,6 +17,10 @@ endif()
 
 if(POLICY CMP0077)
     cmake_policy(SET CMP0077 OLD)
+endif()
+
+if(POLICY CMP0074)
+    cmake_policy(SET CMP0074 NEW)
 endif()
 
 if(${CMAKE_MAJOR_VERSION} GREATER 2)
