@@ -1,6 +1,7 @@
 ########################################################################
 ## Create lime-suite project
 ########################################################################
+cmake_policy(SET CMP0074 NEW)
 cmake_minimum_required(VERSION 3.1.3)
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo" CACHE STRING INTERNAL FORCE)
 project("LimeSuite")
