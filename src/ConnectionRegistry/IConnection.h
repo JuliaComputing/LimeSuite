@@ -77,6 +77,9 @@ public:
     //! Get the connection handle that was used to create this connection
     const ConnectionHandle &GetHandle(void) const;
 
+    //! Get the file descriptor
+    virtual int getFileDescriptor(void);
+
     /*!
      * Is this connection open?
      * The constructor should attempt to connect but may fail,

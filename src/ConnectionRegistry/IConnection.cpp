@@ -40,6 +40,11 @@ DeviceInfo IConnection::GetDeviceInfo(void)
     return info;
 }
 
+int IConnection::getFileDescriptor(void)
+{
+    return ReportError("File Descriptor not supported");
+}
+
 /***********************************************************************
  * Serial API
  **********************************************************************/

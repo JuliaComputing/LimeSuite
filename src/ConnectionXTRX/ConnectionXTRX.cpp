@@ -47,6 +47,14 @@ int ConnectionXTRX::Open(const unsigned index)
     return IsOpen() ? 0 : -1;
 }
 
+/** @brief Returns the file descriptor.
+    @return file descriptor
+*/
+int ConnectionXTRX::getFileDescriptor()
+{
+    return fd;
+}
+
 /** @brief Closes communication to device.
 */
 void ConnectionXTRX::Close()
